@@ -14,13 +14,12 @@
 
 package com.liferay.remote.web.component.admin.web.internal;
 
-import com.liferay.portal.kernel.dao.orm.QueryUtil;
-import com.liferay.portal.kernel.log.Log;
-import com.liferay.portal.kernel.log.LogFactoryUtil;
+import aQute.bnd.annotation.metatype.Configurable;
+import com.liferay.remote.web.component.admin.web.internal.configuration.RemoteWebComponentConfiguration;
 import com.liferay.remote.web.component.admin.web.internal.portlet.RemoteWebComponentPortlet;
-import com.liferay.remote.web.component.model.RemoteWebComponentEntry;
-import com.liferay.remote.web.component.service.RemoteWebComponentEntryLocalService;
 
+import java.util.HashSet;
+import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 
@@ -28,107 +27,117 @@ import org.osgi.framework.BundleContext;
 import org.osgi.service.component.annotations.Activate;
 import org.osgi.service.component.annotations.Component;
 import org.osgi.service.component.annotations.Deactivate;
-import org.osgi.service.component.annotations.Reference;
+import org.osgi.service.component.annotations.Modified;
 
 /**
  * @author Iván Zaera Avellón
  */
-@Component(immediate = true, service = RemoteWebComponentPortletRegistrar.class)
+@Component(
+	configurationPid = "com.liferay.remote.web.component.admin.web.internal.configuration.RemoteWebComponentConfiguration",
+	immediate = true,
+	service = RemoteWebComponentPortletRegistrar.class
+)
 public class RemoteWebComponentPortletRegistrar {
 
-	public void registerPortlet(
-		RemoteWebComponentEntry remoteWebComponentEntry) {
-
-		_registerPortlet(remoteWebComponentEntry);
-	}
-
-	public void unregisterPortlet(
-		RemoteWebComponentEntry remoteWebComponentEntry) {
-
-		_unregisterPortlet(
-			remoteWebComponentEntry.getRemoteWebComponentEntryId());
-	}
-
 	@Activate
-	protected void activate(BundleContext bundleContext) {
+	protected void activate(
+		BundleContext bundleContext, Map<String, Object> properties) {
+
+		System.out.println("activate");
+
 		_bundleContext = bundleContext;
+		_remoteWebComponentConfiguration =
+			Configurable.createConfigurable(
+				RemoteWebComponentConfiguration.class, properties);
 
-		if (_log.isInfoEnabled()) {
-			_log.info("Starting remote app entries");
-		}
+		_updatePortlets();
+	}
 
-		for (RemoteWebComponentEntry remoteWebComponentEntry :
-				remoteWebComponentEntryLocalService.
-					getRemoteWebComponentEntries(
-						QueryUtil.ALL_POS, QueryUtil.ALL_POS)) {
+	@Modified
+	protected void updated(Map<String, Object> properties) {
+		System.out.println("updated");
 
-			registerPortlet(remoteWebComponentEntry);
-		}
+		_remoteWebComponentConfiguration =
+			Configurable.createConfigurable(
+				RemoteWebComponentConfiguration.class, properties);
+
+		_updatePortlets();
 	}
 
 	@Deactivate
 	protected void deactivate() {
-		if (_log.isInfoEnabled()) {
-			_log.info("Stopping remote app entries");
-		}
+		System.out.println("deactivate");
 
-		for (long remoteWebComponentEntryId : _remoteAppPortlets.keySet()) {
-			_unregisterPortlet(remoteWebComponentEntryId);
-		}
-	}
+		synchronized (_remoteWebComponentPortlets) {
+			for (RemoteWebComponentPortlet remoteWebComponentPortlet :
+					_remoteWebComponentPortlets.values()) {
 
-	@Reference
-	protected RemoteWebComponentEntryLocalService
-		remoteWebComponentEntryLocalService;
+				remoteWebComponentPortlet.unregister();
+			}
 
-	private void _registerPortlet(
-		RemoteWebComponentEntry remoteWebComponentEntry) {
-
-		RemoteWebComponentPortlet remoteWebComponentPortlet =
-			new RemoteWebComponentPortlet(remoteWebComponentEntry);
-
-		long remoteAppEntryId =
-			remoteWebComponentEntry.getRemoteWebComponentEntryId();
-
-		RemoteWebComponentPortlet existingRemoteWebComponentPortlet =
-			_remoteAppPortlets.putIfAbsent(
-				remoteAppEntryId, remoteWebComponentPortlet);
-
-		if (existingRemoteWebComponentPortlet != null) {
-			throw new IllegalStateException(
-				"Remote app entry " + remoteAppEntryId +
-					" is already registered");
-		}
-
-		remoteWebComponentPortlet.register(_bundleContext);
-
-		if (_log.isInfoEnabled()) {
-			_log.info(
-				"Started remote app entry " +
-					remoteWebComponentPortlet.getName());
+			_remoteWebComponentPortlets.clear();
 		}
 	}
 
-	private void _unregisterPortlet(long remoteAppEntryId) {
-		RemoteWebComponentPortlet remoteWebComponentPortlet =
-			_remoteAppPortlets.remove(remoteAppEntryId);
+	private void _updatePortlets() {
+		String components = _remoteWebComponentConfiguration.components();
 
-		if (remoteWebComponentPortlet != null) {
-			remoteWebComponentPortlet.unregister();
+		if(components == null) {
+			return;
+		}
 
-			if (_log.isInfoEnabled()) {
-				_log.info(
-					"Stopped remote app entry " +
-						remoteWebComponentPortlet.getName());
+		String[] entries = components.split(",");
+
+		synchronized (_remoteWebComponentPortlets) {
+			HashSet<String> keysToRemove =
+				new HashSet<>(_remoteWebComponentPortlets.keySet());
+
+			for (String entry : entries) {
+				String[] entryParts = entry.split("=");
+
+				if(entryParts.length != 2) {
+					System.out.println(
+						"ignored bad web component configuration entry: " +
+							entry);
+
+					continue;
+				}
+
+				String tagName = entryParts[0].trim();
+
+				keysToRemove.remove(tagName);
+
+				RemoteWebComponentPortlet remoteWebComponentPortlet =
+					_remoteWebComponentPortlets.get(tagName);
+
+				if(remoteWebComponentPortlet != null) {
+					remoteWebComponentPortlet.unregister();
+				}
+
+				String url = entryParts[1].trim();
+
+				remoteWebComponentPortlet =
+					new RemoteWebComponentPortlet(tagName, tagName, url);
+
+				remoteWebComponentPortlet.register(_bundleContext);
+
+				_remoteWebComponentPortlets.put(
+					tagName, remoteWebComponentPortlet);
+			}
+
+			for (String tagName : keysToRemove) {
+				RemoteWebComponentPortlet remoteWebComponentPortlet =
+					_remoteWebComponentPortlets.remove(tagName);
+
+				remoteWebComponentPortlet.unregister();
 			}
 		}
 	}
 
-	private static final Log _log = LogFactoryUtil.getLog(
-		RemoteWebComponentPortletRegistrar.class);
-
 	private BundleContext _bundleContext;
-	private final ConcurrentMap<Long, RemoteWebComponentPortlet>
-		_remoteAppPortlets = new ConcurrentHashMap<>();
+	private volatile RemoteWebComponentConfiguration
+		_remoteWebComponentConfiguration;
+	private final ConcurrentMap<String, RemoteWebComponentPortlet>
+		_remoteWebComponentPortlets = new ConcurrentHashMap<>();
 
 }

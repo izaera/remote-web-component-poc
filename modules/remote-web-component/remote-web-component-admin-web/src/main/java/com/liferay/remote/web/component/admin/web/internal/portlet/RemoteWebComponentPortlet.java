@@ -21,7 +21,6 @@ import com.liferay.portal.kernel.portlet.bridges.mvc.MVCPortlet;
 import com.liferay.portal.kernel.util.HashMapBuilder;
 import com.liferay.portal.kernel.util.ResourceBundleLoader;
 import com.liferay.portal.kernel.util.StringBundler;
-import com.liferay.remote.web.component.model.RemoteWebComponentEntry;
 
 import java.io.IOException;
 import java.io.PrintWriter;
@@ -46,18 +45,12 @@ import org.osgi.framework.ServiceRegistration;
  */
 public class RemoteWebComponentPortlet extends MVCPortlet {
 
-	public RemoteWebComponentPortlet(
-		RemoteWebComponentEntry remoteWebComponentEntry) {
+	public RemoteWebComponentPortlet(String name, String tagName, String url) {
+		System.out.println("constructed: " + tagName);
 
-		_remoteWebComponentEntry = remoteWebComponentEntry;
-	}
-
-	public String getName() {
-		return _remoteWebComponentEntry.getNameCurrentLanguageId();
-	}
-
-	public String getName(Locale locale) {
-		return _remoteWebComponentEntry.getName(locale);
+		_name = name;
+		_tagName = tagName;
+		_url = url;
 	}
 
 	public synchronized void register(BundleContext bundleContext) {
@@ -68,17 +61,17 @@ public class RemoteWebComponentPortlet extends MVCPortlet {
 		Dictionary<String, Object> properties = new Hashtable<>();
 
 		properties.put(
-			"com.liferay.portlet.css-class-wrapper",
-			"portlet-remote-web-component");
+				"com.liferay.portlet.css-class-wrapper",
+				"portlet-remote-web-component");
 		properties.put(
-			"com.liferay.portlet.display-category", "category.sample");
+				"com.liferay.portlet.display-category", "category.sample");
 		properties.put(
-			"com.liferay.portlet.header-portlet-css", "/display/css/main.css");
+				"com.liferay.portlet.header-portlet-css", "/display/css/main.css");
 		properties.put("com.liferay.portlet.instanceable", true);
 		properties.put("javax.portlet.name", _getPortletName());
 		properties.put("javax.portlet.security-role-ref", "power-user,user");
 		properties.put(
-			"javax.portlet.resource-bundle", _getResourceBundleName());
+				"javax.portlet.resource-bundle", _getResourceBundleName());
 
 		_serviceRegistration = bundleContext.registerService(
 			Portlet.class, this, properties);
@@ -93,6 +86,8 @@ public class RemoteWebComponentPortlet extends MVCPortlet {
 			bundleContext.registerService(
 				ResourceBundleLoader.class,
 				locale -> _getResourceBundle(locale), properties);
+
+		System.out.println("registered: " + _tagName);
 	}
 
 	@Override
@@ -103,20 +98,15 @@ public class RemoteWebComponentPortlet extends MVCPortlet {
 			PrintWriter printWriter = renderResponse.getWriter();
 
 			printWriter.print(
-				"<script src=\"" + _remoteWebComponentEntry.getUrl() +
-					"\"></script>");
-
-			String name = _remoteWebComponentEntry.getName(
-				renderRequest.getLocale());
+				"<script src=\"" + _url + "\"></script>");
 
 			printWriter.print(
 				StringBundler.concat(
-					StringPool.LESS_THAN, name, StringPool.GREATER_THAN, "</",
-					name, StringPool.GREATER_THAN));
+					StringPool.LESS_THAN, _name, StringPool.GREATER_THAN, "</",
+					_name, StringPool.GREATER_THAN));
 
 			printWriter.flush();
-		}
-		catch (IOException ioException) {
+		} catch (IOException ioException) {
 			_log.error("Unable to render HTML output", ioException);
 		}
 	}
@@ -131,11 +121,13 @@ public class RemoteWebComponentPortlet extends MVCPortlet {
 
 		_resourceBundleLoaderServiceRegistration = null;
 		_serviceRegistration = null;
+
+		System.out.println("unregistered: " + _tagName);
 	}
 
 	private String _getPortletName() {
-		return "remote_web_component_" +
-			_remoteWebComponentEntry.getRemoteWebComponentEntryId();
+		return
+			"remote_web_component_" + _tagName.replaceAll("[^A-Za-z0-9]", "_");
 	}
 
 	private ResourceBundle _getResourceBundle(Locale locale) {
@@ -152,8 +144,7 @@ public class RemoteWebComponentPortlet extends MVCPortlet {
 			}
 
 			private final Map<String, String> _labels = HashMapBuilder.put(
-				"javax.portlet.title." + _getPortletName(),
-				_remoteWebComponentEntry.getName(locale)
+				"javax.portlet.title." + _getPortletName(), _name
 			).build();
 
 		};
@@ -166,9 +157,11 @@ public class RemoteWebComponentPortlet extends MVCPortlet {
 	private static final Log _log = LogFactoryUtil.getLog(
 		RemoteWebComponentPortlet.class);
 
-	private final RemoteWebComponentEntry _remoteWebComponentEntry;
+	private final String _name;
 	private ServiceRegistration<ResourceBundleLoader>
 		_resourceBundleLoaderServiceRegistration;
 	private ServiceRegistration<Portlet> _serviceRegistration;
+	private final String _tagName;
+	private final String _url;
 
 }
